@@ -21,46 +21,47 @@ except requests.exceptions.RequestException as e:
     print(f"FOUT: Kon GoComics pagina niet ophalen. Fout: {e}")
     exit(1)
 
-# --- DEFINITIEVE METHODE V2: Zoek naar de JUISTE JSON-LD tag op basis van inhoud ---
-print("Zoeken naar de correcte JSON-LD script tag op de pagina...")
+# --- DEFINITIEVE METHODE V3: Filteren van 'favorieten' ---
+print("Zoeken naar de correcte JSON-LD script tag en filteren van favorieten...")
 
 image_url = None
 try:
     soup = BeautifulSoup(response.text, 'lxml')
 
-    # 1. Vind ALLE script tags van het type 'application/ld+json'
+    # Vind ALLE script tags van het type 'application/ld+json'
     all_json_ld_scripts = soup.find_all('script', type='application/ld+json')
 
     if not all_json_ld_scripts:
         raise ValueError("Geen 'application/ld+json' script tags gevonden op de pagina.")
 
-    # 2. Loop door elke gevonden script tag om de juiste te vinden
     for script in all_json_ld_scripts:
-        # Zorg ervoor dat de tag inhoud heeft om fouten te voorkomen
         if script.string:
             try:
-                # 3. Laad de inhoud als JSON
                 data = json.loads(script.string)
 
-                # 4. Controleer of dit de JUISTE JSON-blob is.
-                # We zoeken naar een 'ImageObject' dat de pagina representeert ('representativeOfPage').
+                # Controleer of dit een valide 'ImageObject' is dat de pagina representeert
                 if (isinstance(data, dict) and
                         data.get('@type') == 'ImageObject' and
                         data.get('representativeOfPage') is True and
                         'url' in data):
                     
-                    # Gevonden! Pak de URL en stop met zoeken.
+                    # --- DE CRUCIALE EXTRA CONTROLE ---
+                    # Zoek "omhoog" vanaf het script om te zien of het in de 'FiveFavorites' sectie zit.
+                    if script.find_parent('section', class_='ShowFiveFavorites_showFiveFavorites__zsqHu'):
+                        # Ja, dit is een favoriet. Negeer deze en ga door naar de volgende in de loop.
+                        print(f"INFO: 'Favoriet' afbeelding genegeerd: ...{data['url'][-20:]}")
+                        continue
+                    
+                    # Als de code hier komt, is het GEEN favoriet. Dit is de hoofdafbeelding.
                     image_url = data['url']
-                    print(f"SUCCES: Correcte JSON-LD data gevonden. URL: {image_url}")
-                    break  # Verlaat de for-loop, we hebben wat we nodig hebben
+                    print(f"SUCCES: Hoofdafbeelding gevonden: {image_url}")
+                    break  # Stop de loop, we zijn klaar.
 
             except (json.JSONDecodeError, AttributeError):
-                # Soms is een script tag leeg of incorrect, negeer en ga door naar de volgende.
                 continue
     
-    # Als na de loop geen URL is gevonden, geef dan een fout.
     if not image_url:
-        raise ValueError("Kon de specifieke JSON-LD met de comic URL niet vinden tussen alle script tags.")
+        raise ValueError("Kon de hoofdafbeelding niet isoleren van de favorieten.")
 
 except (ValueError, KeyError, TypeError) as e:
     print(f"FOUT: Kon de URL niet uit de data halen. Het script is mogelijk verouderd.")
@@ -71,7 +72,8 @@ except (ValueError, KeyError, TypeError) as e:
     exit(1)
 # --- EINDE DEFINITIEVE METHODE ---
     
-# Stap 3: Bouw de RSS-feed (ongewijzigd)
+# De rest van het script blijft ongewijzigd
+# ... (Stap 3 & 4) ...
 fg = FeedGenerator()
 fg.id(LUANN_URL)
 fg.title('Luann Comic Strip')
@@ -89,7 +91,6 @@ fe.link(href=LUANN_URL)
 fe.pubDate(current_date)
 fe.description(f'<img src="{image_url}" alt="Luann Strip voor {current_date_str}" />')
 
-# Stap 4: Schrijf het XML-bestand weg (ongewijzigd)
 try:
     fg.rss_file('luann.xml', pretty=True)
     print("SUCCES: 'luann.xml' is aangemaakt met de strip van vandaag.")
